@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ito Clone</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+</head>
+<body>
+
+    <div class="game-container">
+        <header>
+            <div class="theme-box">
+                <p class="label">お題</p>
+                <h2 id="theme-text">読み込み中...</h2>
+                <div class="range-info">
+                    <span id="range-min" class="range-tag min">← 小：???</span>
+                    <span id="range-max" class="range-tag max">大：??? →</span>
+                </div>
+            </div>
+            <button id="reveal-btn" class="btn-reveal">OPEN</button>
+        </header>
+
+        <main>
+            <p class="field-label">小さい順に並べてください（←小 大→）</p>
+            <div id="field-area" class="card-list">
+                <div class="card field-card" data-value="10">Aさん</div>
+                <div class="card field-card" data-value="45">Bさん</div>
+                <div class="card field-card" data-value="99">Cさん</div>
+            </div>
+        </main>
+
+        <footer>
+            <div id="hand-area" class="hand-wrapper">
+                <div id="my-card" class="card my-card">72</div>
+            </div>
+            <button id="play-btn" class="btn-play">カードを出す</button>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
