@@ -24,14 +24,16 @@ class GameManager {
         this.confirmOk = document.getElementById('confirm-ok');
         this.confirmCancel = document.getElementById('confirm-cancel');
         
-        // ★追加: 次のゲーム設定モーダル
         this.nextGameModal = document.getElementById('next-game-modal');
         this.nextThemeSelect = document.getElementById('next-theme-select');
         this.nextOk = document.getElementById('next-ok');
         this.nextCancel = document.getElementById('next-cancel');
         
-        // ★追加: ロビーのお題選択
+        this.roomIdDisplay = document.getElementById('room-id-display');
         this.lobbyThemeSelect = document.getElementById('lobby-theme-select');
+
+        // ★追加: お題ジャンル表示用要素
+        this.themeTypeDisplay = document.getElementById('theme-type-display');
 
         this.lobbyScreen = document.getElementById('lobby-screen');
         this.gameScreen = document.getElementById('game-screen');
@@ -71,9 +73,8 @@ class GameManager {
         this.myMemberRef = null;
         this.isHost = false;
         
-        // ★変更: お題管理用
-        this.currentThemeList = []; // 現在読み込んでいるお題リスト
-        this.currentThemeType = 'normal'; // 現在のタイプ(normal, rainbow, etc.)
+        this.currentThemeList = []; 
+        this.currentThemeType = 'normal';
         
         this.currentThemeTitle = "";
         this.onConfirmCallback = null;
@@ -82,7 +83,6 @@ class GameManager {
     }
 
     init() {
-        // 初期ロード時はデフォルト(normal)を読んでおくが、入室時に再ロードされる
         this.loadThemeDeck('normal');
         this.setupEventListeners();
         this.setupSortable();
@@ -111,9 +111,7 @@ class GameManager {
         });
     }
 
-    // ★機能追加: CSVを指定して読み込む
     async loadThemeDeck(type) {
-        // ファイル名のマッピング
         const files = {
             'normal': 'csv/normal.csv',
             'rainbow': 'csv/rainbow.csv',
@@ -126,12 +124,11 @@ class GameManager {
             const response = await fetch(fileName);
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             const text = await response.text();
-            this.currentThemeList = text.trim().split('\n').slice(1); // ヘッダー除去
+            this.currentThemeList = text.trim().split('\n').slice(1);
             this.currentThemeType = type;
             console.log(`Deck loaded: ${type} (${this.currentThemeList.length} themes)`);
         } catch (e) { 
             console.error("CSV読込エラー", e); 
-            // エラー時はとりあえず空配列にしないよう対策
             if(this.currentThemeList.length === 0) {
                 this.currentThemeList = ["お題読み込み失敗,小,大"];
             }
@@ -141,7 +138,6 @@ class GameManager {
     getRandomTheme() {
         if (this.currentThemeList.length === 0) return { title: "お題読込中", min: "小", max: "大" };
         const randomLine = this.currentThemeList[Math.floor(Math.random() * this.currentThemeList.length)];
-        // CSVの形式によってはカンマが含まれる場合があるので注意が必要だが、今回は単純split
         const [title, min, max] = randomLine.split(',');
         return { title, min, max };
     }
@@ -163,10 +159,11 @@ class GameManager {
     async joinRoom(isRejoin = false) {
         const name = this.usernameInput.value.trim();
         const room = this.roomInput.value.trim();
-        // ロビーで選択されたお題タイプを取得
         const selectedThemeType = this.lobbyThemeSelect.value;
 
         if (!name || !room) { alert("入力してください"); return; }
+        
+        this.roomIdDisplay.textContent = room;
 
         const roomRef = ref(db, `rooms/${room}`);
         const snapshot = await get(roomRef);
@@ -191,14 +188,13 @@ class GameManager {
         if (!roomData || !roomData.host) {
             this.isHost = true;
             
-            // ★ホストなら、ロビーで選んだデッキを読み込む
             await this.loadThemeDeck(selectedThemeType);
             const initialTheme = this.getRandomTheme();
             
             await set(roomRef, { 
                 host: name, 
                 theme: initialTheme, 
-                themeType: selectedThemeType, // 現在のデッキタイプを保存
+                themeType: selectedThemeType, 
                 status: 'playing' 
             });
         } else if (roomData.host === name) {
@@ -243,13 +239,13 @@ class GameManager {
         }
         if (foundCard) {
             this.myNumber = foundCard.value;
-            this.myCardElement.textContent = "済";
+            // ★変更: 復帰時も数字を表示したままにする
+            this.myCardElement.textContent = this.myNumber;
             this.myCardElement.classList.add('submitted');
             this.playBtn.textContent = "提出済み";
             this.playBtn.disabled = true;
-            this.myCardElement.onclick = () => {
-                this.myCardElement.textContent = (this.myCardElement.textContent === "済") ? this.myNumber : "済";
-            };
+            // クリックイベントは不要（常に数字が見えているため）
+            this.myCardElement.onclick = null;
         } else {
             this.drawNewCard();
         }
@@ -270,12 +266,13 @@ class GameManager {
         if (this.playBtn.disabled) return;
         this.myCardRef = push(ref(db, `rooms/${this.currentRoomId}/cards`), { name: this.myName, value: this.myNumber });
         this.myCardElement.classList.add('submitted');
-        this.myCardElement.textContent = "済";
+        
+        // ★変更: 「済」に変えず、数字のまま維持
+        // this.myCardElement.textContent = "済"; // 削除
+        
         this.playBtn.textContent = "提出済み";
         this.playBtn.disabled = true;
-        this.myCardElement.onclick = () => {
-            this.myCardElement.textContent = (this.myCardElement.textContent === "済") ? this.myNumber : "済";
-        };
+        this.myCardElement.onclick = null;
     }
 
     exitGame() {
@@ -302,27 +299,21 @@ class GameManager {
         await update(ref(db), updates);
     }
 
-    // ★変更: 次のゲームへ（専用モーダルを開く）
     nextGame() {
-        // 現在のタイプをセレクトボックスに反映
         this.nextThemeSelect.value = this.currentThemeType;
-        // モーダル表示
         this.nextGameModal.classList.remove('hidden');
     }
 
-    // ★追加: 次へモーダルのOK処理
     async handleNextGameOk() {
         const nextType = this.nextThemeSelect.value;
         this.nextGameModal.classList.add('hidden');
 
-        // もしタイプが変わっていたら再ロード
         if (nextType !== this.currentThemeType) {
             await this.loadThemeDeck(nextType);
         }
         
         const newTheme = this.getRandomTheme();
         
-        // Firebase更新 (themeTypeも更新)
         update(ref(db, `rooms/${this.currentRoomId}`), {
             theme: newTheme,
             themeType: nextType, 
@@ -364,6 +355,17 @@ class GameManager {
         return { isSuccess, resultText: resultTextArray.join(" → ") };
     }
 
+    // ★追加: お題タイプの日本語表記変換
+    getThemeTypeLabel(type) {
+        const labels = {
+            'normal': 'ノーマル',
+            'rainbow': 'レインボー',
+            'classic': 'クラシック',
+            'all': 'オールスター'
+        };
+        return labels[type] || 'ノーマル';
+    }
+
     startListeningToRoom() {
         const roomRef = ref(db, `rooms/${this.currentRoomId}`);
         onValue(roomRef, (snapshot) => {
@@ -383,12 +385,14 @@ class GameManager {
                 this.rangeMax.textContent = roomData.theme.max;
             }
 
-            // ★追加: 途中参加やリロード時に、現在の部屋のthemeTypeに合わせてデッキをロードする
-            // (ホスト以外でも、次のゲームの準備などのために合わせておくと良いが、
-            // 実際はホストがランダムなお題文字列を送ってくるだけなのでゲストはロード必須ではない。
-            // ただしホストが変わる可能性も考慮して同期しておく)
-            if (roomData.themeType && roomData.themeType !== this.currentThemeType) {
-                this.loadThemeDeck(roomData.themeType);
+            // ★追加: お題ジャンルの表示更新
+            if (roomData.themeType) {
+                this.themeTypeDisplay.textContent = this.getThemeTypeLabel(roomData.themeType);
+                
+                // ホスト以外の場合、デッキを同期しておく（次へ進む時用）
+                if (roomData.themeType !== this.currentThemeType) {
+                    this.loadThemeDeck(roomData.themeType);
+                }
             }
 
             if (!roomData.cards && roomData.status === 'playing') {
@@ -533,7 +537,6 @@ class GameManager {
         this.resetBtn.addEventListener('click', () => this.resetGame());
         this.exitBtn.addEventListener('click', () => this.exitGame());
         
-        // 汎用確認モーダル
         this.confirmOk.addEventListener('click', () => {
             this.confirmModal.classList.add('hidden');
             if (this.onConfirmCallback) {
@@ -546,7 +549,6 @@ class GameManager {
             this.onConfirmCallback = null;
         });
 
-        // ★追加: 次のゲーム設定モーダル
         this.nextOk.addEventListener('click', () => this.handleNextGameOk());
         this.nextCancel.addEventListener('click', () => this.nextGameModal.classList.add('hidden'));
 

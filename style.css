@@ -1,5 +1,5 @@
 /* =========================================
-   Variables & Reset
+   Variables & Reset (変更なし)
    ========================================= */
 :root {
     --primary: #3f51b5;
@@ -35,7 +35,7 @@ body {
 .hidden { display: none !important; }
 
 /* =========================================
-   Background Guide (Game Screen Only)
+   Background Guide
    ========================================= */
 .background-guide {
     position: fixed; 
@@ -121,8 +121,35 @@ body {
     z-index: 10; 
 }
 .theme-container { flex: 1; margin-right: 10px; }
+
+/* ラベル周り調整 */
+.label-row { display: flex; align-items: center; gap: 8px; }
 .label-mini { font-size: 0.7rem; color: var(--text-sub); display: block; }
+
+/* ★追加: お題ジャンルバッジ */
+.theme-badge {
+    font-size: 0.65rem;
+    background-color: #f5f5f5;
+    color: #757575;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid #ddd;
+    font-weight: normal;
+}
+
 #theme-text { margin: 0; font-size: 1.1rem; color: var(--text-main); line-height: 1.3; }
+
+/* ★追加: 部屋番号バッジ */
+.room-badge {
+    display: inline-block;
+    background-color: #e3f2fd;
+    color: var(--primary);
+    font-size: 0.75rem;
+    font-weight: bold;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-bottom: 4px;
+}
 
 .range-indicator { display: flex; align-items: center; margin-top: 5px; gap: 5px; }
 .range-bar { flex: 1; height: 4px; background: linear-gradient(90deg, #3f51b5, #f50057); border-radius: 2px; }
@@ -193,7 +220,18 @@ footer {
 .hand-container { display: flex; align-items: center; justify-content: space-between; }
 .my-card-wrapper { flex: 1; display: flex; justify-content: center; }
 .my-card { width: 80px; height: 120px; font-size: 2.5rem; color: var(--primary); border: 2px solid var(--primary); font-weight: bold; }
-.my-card.submitted { background: #cfd8dc; border-color: #b0bec5; color: #90a4ae; cursor: pointer; }
+
+/* ★修正: 提出済みのカードスタイル */
+/* 数字は見えるままで、グレーアウトさせる */
+.my-card.submitted { 
+    background: #e0e0e0; 
+    border-color: #bdbdbd; 
+    color: #757575; 
+    cursor: default;
+    /* 押せない雰囲気を出す */
+    box-shadow: none;
+}
+
 .action-wrapper { flex: 1; display: flex; justify-content: center; }
 
 /* =========================================
@@ -224,7 +262,6 @@ footer {
 .icon-btn.logout { color: var(--danger); background-color: #ffebee; }
 .icon-btn.logout:hover { background-color: #ffcdd2; }
 
-/* Material Icons Fallback */
 .material-icon { font-family: sans-serif; font-style: normal; font-weight: bold; }
 
 /* =========================================
@@ -246,7 +283,6 @@ footer {
 .result-box.success h2 { color: var(--success); }
 .result-box.fail h2 { color: var(--danger); }
 
-/* History Modal */
 .modal-content { width: 90%; max-width: 500px; max-height: 80vh; padding: 0; overflow: hidden; display: flex; flex-direction: column; }
 .modal-header { padding: 15px 20px; background: var(--bg-color); border-bottom: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; }
 .modal-header h2 { margin: 0; font-size: 1.2rem; }
@@ -260,7 +296,6 @@ footer {
 .history-detail { font-size: 0.8rem; color: var(--text-sub); margin-top: 5px; }
 .empty-msg { text-align: center; color: var(--text-sub); margin-top: 20px; }
 
-/* Confirm Modal */
 .confirm-box { width: 80%; max-width: 300px; padding: 20px; }
 .confirm-box h3 { margin-top: 0; color: var(--text-main); }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
@@ -268,76 +303,46 @@ footer {
 @keyframes popIn { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
 
 /* =========================================
-   Mobile Optimization (iPhone PWA対応版)
+   Mobile Optimization
    ========================================= */
 @media (max-width: 600px) {
-    
     body {
-        /* ★変更: bodyの上の余白は削除（ヘッダーを上端にくっつけるため） */
-        padding-top: 0; 
-        
-        /* 下と左右の安全領域は確保したまま */
+        padding-top: 0;
         padding-bottom: max(20px, env(safe-area-inset-bottom));
         padding-left: env(safe-area-inset-left);
         padding-right: env(safe-area-inset-right);
         background-color: var(--bg-color); 
     }
 
-    /* ロビー画面の調整 */
     .screen {
-        /* ロビーも上端が隠れないように余白を追加 */
-        padding-top: env(safe-area-inset-top);
+        padding-top: max(40px, env(safe-area-inset-top));
     }
 
-    /* ★重要: ゲーム画面のヘッダー調整 */
     .app-bar {
-        /* ヘッダー自体の高さを伸ばして、ステータスバーの領域をカバーする */
-        /* "15px" は元々の余白 + "env(...)" がiPhoneのノッチの高さ */
-        padding-top: calc(15px + env(safe-area-inset-top));
+        padding-top: max(44px, calc(15px + env(safe-area-inset-top)));
         padding-bottom: 10px;
         padding-left: 15px;
         padding-right: 15px;
-
         flex-wrap: wrap;
         gap: 10px;
         position: relative;
         z-index: 100;
+        position: sticky;
+        top: 0;
     }
 
-    .theme-container {
-        min-width: 150px;
-        flex: 1;
-    }
-
-    #theme-text {
-        font-size: 1rem;
-        line-height: 1.4;
-    }
+    .theme-container { min-width: 150px; flex: 1; }
+    #theme-text { font-size: 1rem; line-height: 1.4; }
 
     main {
-        /* ヘッダーとの隙間調整 */
-        padding: 10px 15px 20px 15px; 
+        padding: 20px 15px; 
         background-color: transparent; 
     }
 
-    .card-list {
-        padding: 5px;
-        gap: 8px; 
-    }
+    .card-list { padding: 5px; gap: 8px; }
     
-    .field-card {
-        width: 55px;
-        height: 85px;
-        font-size: 0.8rem;
-    }
-    
-    .card-avatar {
-        width: 20px;
-        height: 20px;
-        font-size: 10px;
-    }
+    .field-card { width: 55px; height: 85px; font-size: 0.8rem; }
+    .card-avatar { width: 20px; height: 20px; font-size: 10px; }
 
-    footer {
-        padding-bottom: max(15px, env(safe-area-inset-bottom));
-    }
+    footer { padding-bottom: max(15px, env(safe-area-inset-bottom)); }
 }
