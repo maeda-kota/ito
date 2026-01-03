@@ -115,13 +115,13 @@ class GameManager {
     async loadThemeDeck(type) {
         // ファイル名のマッピング
         const files = {
-            'normal': 'normal.csv',
-            'rainbow': 'rainbow.csv',
-            'classic': 'classic.csv',
-            'all': 'all.csv'
+            'normal': 'csv/normal.csv',
+            'rainbow': 'csv/rainbow.csv',
+            'classic': 'csv/classic.csv',
+            'all': 'csv/all.csv'
         };
 
-        const fileName = files[type] || 'normal.csv';
+        const fileName = files[type] || 'csv/normal.csv';
         try {
             const response = await fetch(fileName);
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
