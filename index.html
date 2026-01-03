@@ -9,7 +9,26 @@
 </head>
 <body>
 
-    <div class="game-container">
+    <div id="lobby-screen" class="screen">
+        <div class="lobby-box">
+            <h1>ito Clone</h1>
+            <p>協力して数字を並べよう</p>
+            
+            <div class="input-group">
+                <label>ニックネーム</label>
+                <input type="text" id="username-input" placeholder="例: たなか" maxlength="8">
+            </div>
+            
+            <div class="input-group">
+                <label>部屋番号 (Room ID)</label>
+                <input type="text" id="room-input" placeholder="例: 101">
+            </div>
+
+            <button id="join-btn" class="btn-play">部屋に入る / 作る</button>
+        </div>
+    </div>
+
+    <div id="game-screen" class="game-container hidden">
         <header>
             <div class="theme-box">
                 <p class="label">お題</p>
@@ -19,26 +38,59 @@
                     <span id="range-max" class="range-tag max">大：??? →</span>
                 </div>
             </div>
-            <button id="reveal-btn" class="btn-reveal">OPEN</button>
+            
+            <div class="header-buttons">
+                <button id="history-btn" class="btn-history">履歴</button>
+                
+                <div id="host-controls" class="header-buttons hidden">
+                    <button id="next-game-btn" class="btn-next">次のゲームへ</button>
+                    <button id="reveal-btn" class="btn-reveal">OPEN</button>
+                    <button id="reset-btn" class="btn-reset">リセット</button>
+                </div>
+            </div>
         </header>
+
+        <div id="member-bar" class="member-bar">
+            <div class="member-summary">
+                <span id="member-count">参加者: 0人</span>
+                <button id="toggle-members" class="btn-sm">▼ 詳細</button>
+            </div>
+            <div id="member-list" class="member-list hidden">
+                </div>
+        </div>
 
         <main>
             <p class="field-label">小さい順に並べてください（←小 大→）</p>
-            <div id="field-area" class="card-list">
-                <div class="card field-card" data-value="10">Aさん</div>
-                <div class="card field-card" data-value="45">Bさん</div>
-                <div class="card field-card" data-value="99">Cさん</div>
+            
+            <div id="field-area" class="card-list"></div>
+
+            <div id="result-overlay" class="result-overlay hidden">
+                <div class="result-box">
+                    <h2 id="result-title">SUCCESS!</h2>
+                    <p id="result-desc">判定結果がここに表示されます</p>
+                    <button id="close-result" class="btn-play">閉じる</button>
+                </div>
             </div>
         </main>
 
         <footer>
             <div id="hand-area" class="hand-wrapper">
-                <div id="my-card" class="card my-card">72</div>
+                <div id="my-card" class="card my-card">?</div>
             </div>
             <button id="play-btn" class="btn-play">カードを出す</button>
         </footer>
     </div>
 
-    <script src="script.js"></script>
+    <div id="history-modal" class="modal hidden">
+        <div class="modal-content">
+            <span id="close-history" class="close-btn">&times;</span>
+            <h2>これまでの戦績</h2>
+            <div id="history-list" class="history-list">
+                <p>まだ履歴はありません</p>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="script.js"></script>
 </body>
 </html>
