@@ -193,9 +193,29 @@
                 </div>
             </div>
 
+            <div class="input-group">
+                <label>ひとことメモ（任意）</label>
+                <input type="text" id="memo-input" maxlength="30" placeholder="例: 朝ごはんの定番！">
+            </div>
+
             <div class="confirm-actions">
                 <button id="pos-cancel" class="btn btn-text">キャンセル</button>
                 <button id="pos-ok" class="btn btn-primary">決定</button>
+            </div>
+        </div>
+    </div>
+    <div id="memo-modal" class="modal hidden">
+        <div class="card-panel confirm-box">
+            <h3>メモを編集</h3>
+            <p style="font-size:0.8rem; color:#666;">空欄のまま保存するとメモを削除します</p>
+
+            <div class="input-group">
+                <input type="text" id="memo-edit-input" maxlength="30" placeholder="ひとことメモ">
+            </div>
+
+            <div class="confirm-actions">
+                <button id="memo-cancel" class="btn btn-text">キャンセル</button>
+                <button id="memo-save" class="btn btn-primary">保存</button>
             </div>
         </div>
     </div>

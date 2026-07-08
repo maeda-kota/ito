@@ -22,6 +22,15 @@ function withTimeout(promise, ms = 8000) {
     ]);
 }
 
+// ユーザー入力(名前・メモ等)は必ずtextContentとして扱う(XSS対策)。
+// innerHTMLへの文字列埋め込みは禁止し、このヘルパーでDOMを組み立てる。
+function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = text;
+    return node;
+}
+
 // --- GameManager Class ---
 class GameManager {
     constructor() {
@@ -75,6 +84,11 @@ class GameManager {
         this.positionSelect = document.getElementById('position-select');
         this.posOk = document.getElementById('pos-ok');
         this.posCancel = document.getElementById('pos-cancel');
+        this.memoInput = document.getElementById('memo-input');
+        this.memoModal = document.getElementById('memo-modal');
+        this.memoEditInput = document.getElementById('memo-edit-input');
+        this.memoSave = document.getElementById('memo-save');
+        this.memoCancel = document.getElementById('memo-cancel');
 
         // Game state
         this.currentRoomId = null;
@@ -102,6 +116,7 @@ class GameManager {
         this._lastMemberState = null;
         this._awayTimer = null;
         this._isNewRoom = false;
+        this._memoEditCardId = null; // メモ編集モーダルで編集中のカードキー
 
         this.init();
     }
@@ -112,36 +127,6 @@ class GameManager {
         this.setupSortable();
         this.setupFieldDelegation();
         this.checkSession();
-        this.cleanStaleRooms();
-    }
-
-    async cleanStaleRooms() {
-        try {
-            const STALE_MS = 1 * 60 * 60 * 1000;
-            const now = Date.now();
-            const roomsRef = ref(db, 'rooms');
-            const snapshot = await get(roomsRef);
-            const rooms = snapshot.val();
-            if (!rooms) return;
-
-            for (const [roomId, roomData] of Object.entries(rooms)) {
-                if (!roomData.members) {
-                    // メンバーがいない部屋は即削除
-                    await remove(ref(db, `rooms/${roomId}`));
-                    continue;
-                }
-                const members = Object.values(roomData.members);
-                const isAnyoneOnline = members.some(m => m.isOnline === true);
-                const lastActivity = roomData.lastActivity || 0;
-
-                if (!isAnyoneOnline && (now - lastActivity) > STALE_MS) {
-                    console.log(`古い部屋を削除: ${roomId}`);
-                    await remove(ref(db, `rooms/${roomId}`));
-                }
-            }
-        } catch (e) {
-            console.error("cleanStaleRooms error:", e);
-        }
     }
 
     setupFieldDelegation() {
@@ -152,9 +137,11 @@ class GameManager {
             this._pressedCard = card;
             card.classList.remove('revealed');
             card.classList.add('showing-owner');
-            const color = card.dataset.color;
-            const initial = card.dataset.name.charAt(0);
-            card.innerHTML = `<div class="card-avatar" style="background-color: ${color}">${initial}</div><div class="card-name">${card.dataset.name}</div>`;
+            const avatar = el('div', 'card-avatar', card.dataset.name.charAt(0));
+            avatar.style.backgroundColor = card.dataset.color;
+            card.textContent = "";
+            card.appendChild(avatar);
+            card.appendChild(el('div', 'card-name', card.dataset.name));
         };
         const hideOwner = () => {
             const card = this._pressedCard;
@@ -180,6 +167,17 @@ class GameManager {
             showOwner(card);
         }, { passive: false });
         this.fieldArea.addEventListener('touchend', hideOwner);
+
+        // メモ吹き出し: 自分のカードはタップで編集モーダル、他人のメモはタップで全文表示を切替
+        this.fieldArea.addEventListener('click', (e) => {
+            const bubble = e.target.closest('.memo-bubble');
+            if (!bubble || bubble.classList.contains('invisible')) return;
+            if (bubble.classList.contains('editable')) {
+                this.openMemoEditor(bubble.dataset.id);
+            } else {
+                bubble.classList.toggle('expanded');
+            }
+        });
     }
 
     checkSession() {
@@ -203,8 +201,13 @@ class GameManager {
             ghostClass: 'sortable-ghost',
             onEnd: () => {
                 if (!this.currentRoomId) return;
-                const newOrder = Array.from(this.fieldArea.children).map(card => card.dataset.id);
-                this._lastFieldState = newOrder.join(',') + '|0';
+                // 場の子要素は .field-slot（カード＋メモ吹き出しのラッパー）
+                const slots = Array.from(this.fieldArea.children);
+                const newOrder = slots.map(slot => slot.dataset.id);
+                // renderFieldのstateKeyと同じフォーマットで記録し、自分の並べ替えでの再描画を防ぐ
+                this._lastFieldState = slots.map(slot => `${slot.dataset.id}:${slot.dataset.memo || ''}`).join(',') + '|0';
+                // 並べ替えは「全体の並びの上書き」なのでlast-write-winsを許容する
+                // （提出=orderへの挿入はtransactionで保護済み。同時に並べ替えた場合のみ後勝ち）
                 set(ref(db, `rooms/${this.currentRoomId}/order`), newOrder);
             }
         });
@@ -275,7 +278,8 @@ class GameManager {
         let succeeded = false;
 
         try {
-            const name = this.usernameInput.value.trim();
+            // maxlength属性はDevTools等で回避できるため、JS側でも8文字に制限する
+            const name = this.usernameInput.value.trim().slice(0, 8);
             const room = this.roomInput.value.trim();
             const selectedThemeType = this.lobbyThemeSelect.value;
 
@@ -297,26 +301,15 @@ class GameManager {
             const snapshot = await withTimeout(get(roomRef));
             let roomData = snapshot.val();
 
-            // 部屋のリセット判定（全員オフライン + 2時間経過なら削除）
+            // 部屋のリセット判定（全員オフラインなら削除して新規作成扱い）
             if (roomData && roomData.members) {
                 const members = Object.values(roomData.members);
                 const isAnyoneOnline = members.some(m => m.isOnline === true);
 
                 if (!isAnyoneOnline) {
-                    const STALE_MS = 1 * 60 * 60 * 1000; // 2時間
-                    const lastActivity = roomData.lastActivity || 0;
-                    const isStale = (Date.now() - lastActivity) > STALE_MS;
-
-                    if (isStale) {
-                        console.log("全員オフライン＋2時間経過のため、部屋を削除します");
-                        await remove(roomRef);
-                        roomData = null;
-                    } else {
-                        // 2時間未満でも全員オフラインなら上書き（新規作成扱い）
-                        console.log("全員オフラインのため、部屋をリセットして新規作成します");
-                        await remove(roomRef);
-                        roomData = null;
-                    }
+                    console.log("全員オフラインのため、部屋をリセットして新規作成します");
+                    await remove(roomRef);
+                    roomData = null;
                 }
             }
 
@@ -382,7 +375,10 @@ class GameManager {
             }
 
             onDisconnect(this.myMemberRef).update({ isOnline: false });
-            
+
+            // 入室もアクティビティとして記録（1時間未更新での自動削除を防ぐ）
+            update(ref(db, `rooms/${this.currentRoomId}`), { lastActivity: Date.now() }).catch(() => {});
+
             this.updateHostUI();
             if (this._isNewRoom) {
                 this.drawNewCard();
@@ -480,23 +476,24 @@ class GameManager {
         this.playBtn.textContent = "抽選中...";
 
         const cardsRef = ref(db, `rooms/${this.currentRoomId}/cards`);
+        // キーはコールバックの外で1回だけ生成する（transactionはリトライされ得るため）
+        const newKey = 'card_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
 
         try {
             await runTransaction(cardsRef, (currentCards) => {
                 const cardsObj = currentCards || {};
-                const usedNumbers = Object.values(cardsObj).map(c => parseInt(c.value));
-                
-                const nextNumber = this.generateUniqueNumber(usedNumbers);
-                if (nextNumber === 0) return; 
 
-                const newKey = 'card_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
-                
-                if (!currentCards) {
-                    return { [newKey]: { name: this.myName, value: nextNumber } };
-                } else {
-                    currentCards[newKey] = { name: this.myName, value: nextNumber };
-                    return currentCards;
+                // 既に自分のカードがあれば何もしない（二重ドロー防止）
+                if (Object.values(cardsObj).some(c => c && c.name === this.myName)) {
+                    return cardsObj;
                 }
+
+                const usedNumbers = Object.values(cardsObj).map(c => parseInt(c.value));
+                const nextNumber = this.generateUniqueNumber(usedNumbers);
+                if (nextNumber === 0) return;
+
+                cardsObj[newKey] = { name: this.myName, value: nextNumber };
+                return cardsObj;
             });
 
             const snapshot = await get(cardsRef);
@@ -549,12 +546,9 @@ class GameManager {
             const snapshot = await withTimeout(get(ref(db, `rooms/${this.currentRoomId}`)));
             const roomData = snapshot.val();
 
-            if (!roomData || !roomData.order || roomData.order.length === 0) {
-                await this.executePlayCardZero();
-                return;
-            }
-
-            this.generatePositionOptions(roomData);
+            // 場が空でも常にモーダルを開く（位置＋メモを一箇所で入力するため）
+            this.generatePositionOptions(roomData || {});
+            this.memoInput.value = "";
             this.positionModal.classList.remove('hidden');
         } catch (error) {
             console.error("playCard error:", error);
@@ -568,7 +562,7 @@ class GameManager {
 
         const optFirst = document.createElement('option');
         optFirst.value = "first";
-        optFirst.textContent = "一番左（小さい）";
+        optFirst.textContent = cardsArray.length === 0 ? "最初のカードとして出す" : "一番左（小さい）";
         this.positionSelect.appendChild(optFirst);
 
         cardsArray.forEach((card, index) => {
@@ -596,23 +590,35 @@ class GameManager {
                 this.myNumber = cards[cardKey].value;
             }
 
-            const snapshot = await withTimeout(get(ref(db, `rooms/${this.currentRoomId}/order`)));
-            let currentOrder = snapshot.val() || [];
             const cardId = this.myCardRef.key;
 
-            let newOrder = [...currentOrder];
-            if (selectedValue === "first") {
-                newOrder.unshift(cardId);
-            } else {
-                const targetIndex = newOrder.indexOf(selectedValue);
-                if (targetIndex !== -1) {
-                    newOrder.splice(targetIndex + 1, 0, cardId);
-                } else {
-                    newOrder.push(cardId);
-                }
+            // メモ（任意・30文字以内）。orderに載る前に書き込み、他クライアントの初回描画時に揃っているようにする
+            const memo = this.memoInput.value.trim().slice(0, 30);
+            if (memo) {
+                await withTimeout(update(this.myCardRef, { memo }));
             }
+            this.memoInput.value = "";
 
-            await withTimeout(set(ref(db, `rooms/${this.currentRoomId}/order`), newOrder));
+            // 同時提出で他の人の提出が消えないよう、get→setではなくtransactionで挿入する
+            await withTimeout(runTransaction(ref(db, `rooms/${this.currentRoomId}/order`), (currentOrder) => {
+                const newOrder = currentOrder || [];
+                if (newOrder.includes(cardId)) return newOrder; // 二重提出防止
+
+                if (selectedValue === "first") {
+                    newOrder.unshift(cardId);
+                } else {
+                    const targetIndex = newOrder.indexOf(selectedValue);
+                    if (targetIndex !== -1) {
+                        newOrder.splice(targetIndex + 1, 0, cardId);
+                    } else {
+                        newOrder.push(cardId);
+                    }
+                }
+                return newOrder;
+            }));
+
+            // 提出もアクティビティとして記録（プレイ中の部屋自動削除を防ぐ）
+            update(ref(db, `rooms/${this.currentRoomId}`), { lastActivity: Date.now() }).catch(() => {});
 
             this.myCardElement.classList.add('submitted');
             this.playBtn.textContent = "提出済み";
@@ -625,29 +631,44 @@ class GameManager {
         }
     }
 
-    async executePlayCardZero() {
+    // 自分のカードのメモ編集モーダルを開く（提出後の編集用）
+    async openMemoEditor(cardId) {
         try {
-            if (!this.myCardRef) {
-                const snapshot = await withTimeout(get(ref(db, `rooms/${this.currentRoomId}/cards`)));
-                const cards = snapshot.val();
-                const cardKey = Object.keys(cards).find(key => cards[key].name === this.myName);
-                this.myCardRef = ref(db, `rooms/${this.currentRoomId}/cards/${cardKey}`);
-            }
+            const snapshot = await withTimeout(get(ref(db, `rooms/${this.currentRoomId}/cards/${cardId}`)));
+            const card = snapshot.val();
+            // 編集できるのは自分のカードのみ
+            if (!card || card.name !== this.myName) return;
 
-            const cardId = this.myCardRef.key;
-            const snapshot = await withTimeout(get(ref(db, `rooms/${this.currentRoomId}/order`)));
-            let currentOrder = snapshot.val() || [];
-            currentOrder.push(cardId);
-            await withTimeout(set(ref(db, `rooms/${this.currentRoomId}/order`), currentOrder));
-
-            this.myCardElement.classList.add('submitted');
-            this.playBtn.textContent = "提出済み";
-            this.playBtn.disabled = true;
+            this._memoEditCardId = cardId;
+            this.memoEditInput.value = card.memo || "";
+            this.memoModal.classList.remove('hidden');
+            this.memoEditInput.focus();
         } catch (error) {
-            console.error("executePlayCardZero error:", error);
-            this.showToast("カード提出に失敗しました");
-            this.playBtn.textContent = "カードを出す";
-            this.playBtn.disabled = false;
+            console.error("openMemoEditor error:", error);
+            this.showToast("メモの読み込みに失敗しました", 'warning');
+        }
+    }
+
+    async saveMemoEdit() {
+        const cardId = this._memoEditCardId;
+        this._memoEditCardId = null;
+        this.memoModal.classList.add('hidden');
+        if (!cardId) return;
+
+        const memo = this.memoEditInput.value.trim().slice(0, 30);
+
+        try {
+            // OPEN後は編集不可（結果が履歴に保存済みのため）
+            const statusSnap = await withTimeout(get(ref(db, `rooms/${this.currentRoomId}/status`)));
+            if (statusSnap.val() === 'revealed') {
+                this.showToast("OPEN後はメモを編集できません", 'warning');
+                return;
+            }
+            // 空欄で保存 = メモ削除（update に null を渡すと memo キーごと消える）
+            await withTimeout(update(ref(db, `rooms/${this.currentRoomId}/cards/${cardId}`), { memo: memo || null }));
+        } catch (error) {
+            console.error("saveMemoEdit error:", error);
+            this.showToast("メモの保存に失敗しました", 'warning');
         }
     }
 
@@ -696,7 +717,13 @@ class GameManager {
             const roomData = snapshot.val();
             if (roomData.status === 'revealed') return;
             const { isSuccess, resultText } = this.calculateResult(roomData);
-            const historyEntry = { theme: this.currentThemeTitle, isSuccess, resultDetails: resultText, timestamp: Date.now() };
+            // メモも振り返れるよう構造化データも保存する（resultDetailsは旧形式の互換用に残す）
+            const submittedCards = this._getSubmittedCards(roomData).map(c => ({
+                name: c.name,
+                value: c.value,
+                memo: c.memo || null
+            }));
+            const historyEntry = { theme: this.currentThemeTitle, isSuccess, resultDetails: resultText, cards: submittedCards, timestamp: Date.now() };
             const updates = {};
             updates[`rooms/${this.currentRoomId}/status`] = 'revealed';
             updates[`rooms/${this.currentRoomId}/lastActivity`] = Date.now();
@@ -809,10 +836,12 @@ class GameManager {
             }
 
             if (roomData.members) {
-                // ���ーストエントリ（nameなし）を自動削除
-                for (const [key, val] of Object.entries(roomData.members)) {
-                    if (!val.name) {
-                        remove(ref(db, `rooms/${this.currentRoomId}/members/${key}`));
+                // ゴーストエントリ（nameなし）の掃除はホストのみが行う（全員が同時にremoveすると冗長なため）
+                if (this.isHost) {
+                    for (const [key, val] of Object.entries(roomData.members)) {
+                        if (!val.name) {
+                            remove(ref(db, `rooms/${this.currentRoomId}/members/${key}`));
+                        }
                     }
                 }
 
@@ -1004,14 +1033,19 @@ class GameManager {
         const cardsArray = this._getSubmittedCards(roomData);
         const isRevealed = (roomData.status === 'revealed');
 
-        const stateKey = cardsArray.map(c => c.id).join(',') + '|' + (isRevealed ? '1' : '0');
+        // メモも表示に影響するためstateKeyに含める（メモ編集が再描画に反映されるように）
+        const stateKey = cardsArray.map(c => `${c.id}:${c.memo || ''}`).join(',') + '|' + (isRevealed ? '1' : '0');
         if (this._lastFieldState === stateKey) return;
         this._lastFieldState = stateKey;
 
         this.fieldArea.innerHTML = "";
         cardsArray.forEach(cardData => {
-            const newCard = document.createElement('div');
-            newCard.classList.add('card', 'field-card');
+            // カード＋メモ吹き出しを縦に並べるスロット。並べ替え(Sortable)の単位もこのスロット
+            const slot = el('div', 'field-slot');
+            slot.dataset.id = cardData.id;
+            slot.dataset.memo = cardData.memo || '';
+
+            const newCard = el('div', 'card field-card');
             newCard.dataset.value = cardData.value;
             newCard.dataset.id = cardData.id;
             newCard.dataset.name = cardData.name;
@@ -1021,13 +1055,40 @@ class GameManager {
                 newCard.textContent = cardData.value;
                 newCard.classList.add('revealed');
             } else {
-                const avatarColor = this.getColorFromName(cardData.name);
-                const avatarInitial = cardData.name.charAt(0);
-                newCard.innerHTML = `<div class="card-avatar" style="background-color: ${avatarColor}">${avatarInitial}</div><div class="card-name">${cardData.name}</div>`;
+                const avatar = el('div', 'card-avatar', cardData.name.charAt(0));
+                avatar.style.backgroundColor = this.getColorFromName(cardData.name);
+                newCard.appendChild(avatar);
+                newCard.appendChild(el('div', 'card-name', cardData.name));
             }
 
-            this.fieldArea.appendChild(newCard);
+            slot.appendChild(newCard);
+            slot.appendChild(this.renderMemoBubble(cardData, isRevealed));
+            this.fieldArea.appendChild(slot);
         });
+    }
+
+    // メモ吹き出しの生成。現在は「常時表示」方式。
+    // 将来「長押しで表示」に変える場合は、この関数とCSS(.memo-bubble)のみ変更すればよい
+    renderMemoBubble(cardData, isRevealed) {
+        const memo = cardData.memo || "";
+        const canEdit = (cardData.name === this.myName) && !isRevealed;
+
+        const bubble = el('div', 'memo-bubble');
+        bubble.dataset.id = cardData.id;
+
+        if (memo) {
+            bubble.appendChild(el('span', 'memo-text', memo));
+        } else if (canEdit) {
+            // 自分のカードでメモ未入力なら追加ボタンとして機能
+            bubble.classList.add('empty');
+            bubble.appendChild(el('span', 'memo-text', '＋メモ'));
+        } else {
+            // メモなし＆編集不可: 高さを揃えるため場所だけ確保して非表示
+            bubble.classList.add('invisible');
+        }
+
+        if (canEdit) bubble.classList.add('editable');
+        return bubble;
     }
 
     renderMemberList(membersObj, cardsObj, hostName, orderList = []) {
@@ -1053,32 +1114,32 @@ class GameManager {
             const isSubmitted = submittedMemberNames.includes(member.name);
             if (isSubmitted) submittedCount++;
 
-            const item = document.createElement('div');
-            item.classList.add('member-chip');
-            const color = this.getColorFromName(member.name);
-            const initial = member.name.charAt(0);
-            const statusMark = isSubmitted ? '✔' : '';
-            let hostLabel = "";
+            const item = el('div', 'member-chip');
+
+            const avatar = el('div', 'avatar-xs', member.name.charAt(0));
+            avatar.style.backgroundColor = this.getColorFromName(member.name);
+            item.appendChild(avatar);
+            item.appendChild(document.createTextNode(member.name));
+
             if (member.name === hostName) {
-                hostLabel = '<span class="host-badge">HOST</span>';
+                item.appendChild(el('span', 'host-badge', 'HOST'));
             }
 
-            let kickBtn = "";
+            const statusMark = el('span', 'status-mark', isSubmitted ? '✔' : '');
+            statusMark.style.color = isSubmitted ? 'green' : '#999';
+            item.appendChild(statusMark);
+
             if (this.isHost && member.name !== this.myName) {
-                kickBtn = `<button class="kick-btn" data-member-id="${member.id}" data-member-name="${member.name}" title="キック">✕</button>`;
+                const kickBtn = el('button', 'kick-btn', '✕');
+                kickBtn.title = 'キック';
+                kickBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.kickMember(member.id, member.name);
+                });
+                item.appendChild(kickBtn);
             }
 
-            item.innerHTML = `<div class="avatar-xs" style="background-color: ${color}">${initial}</div>${member.name}${hostLabel}<span class="status-mark" style="color: ${isSubmitted ? 'green' : '#999'}">${statusMark}</span>${kickBtn}`;
             this.memberList.appendChild(item);
-        });
-
-        this.memberList.querySelectorAll('.kick-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const memberId = btn.dataset.memberId;
-                const memberName = btn.dataset.memberName;
-                this.kickMember(memberId, memberName);
-            });
         });
 
         this.memberCount.textContent = `提出: ${submittedCount}/${total}人 (参加: ${total}人)`;
@@ -1095,15 +1156,16 @@ class GameManager {
                 const cards = cardsSnap.val();
                 if (cards) {
                     const cardKeysToRemove = Object.keys(cards).filter(key => cards[key].name === memberName);
-                    const orderSnap = await get(ref(db, `rooms/${this.currentRoomId}/order`));
-                    let order = orderSnap.val() || [];
+
+                    // orderからの除去は同時提出と競合しないようtransactionで行う
+                    await runTransaction(ref(db, `rooms/${this.currentRoomId}/order`), (order) => {
+                        if (!order) return order;
+                        return order.filter(id => !cardKeysToRemove.includes(id));
+                    });
 
                     for (const cardKey of cardKeysToRemove) {
                         await remove(ref(db, `rooms/${this.currentRoomId}/cards/${cardKey}`));
-                        order = order.filter(id => id !== cardKey);
                     }
-
-                    await set(ref(db, `rooms/${this.currentRoomId}/order`), order);
                 }
 
                 this.showToast(`${memberName} をキックしました`, 'info');
@@ -1143,21 +1205,36 @@ class GameManager {
             }
             const entries = Object.values(data).reverse();
             entries.forEach(entry => {
-                const item = document.createElement('div');
-                
                 const statusClass = entry.isSuccess ? 'success' : 'fail';
-                item.classList.add('history-item', statusClass);
-                
-                const statusText = entry.isSuccess ? '成功' : '失敗';
-                const formattedDetails = entry.resultDetails.replace(/→/g, '<span class="arrow">→</span>');
+                const item = el('div', `history-item ${statusClass}`);
 
-                item.innerHTML = `
-                    <div class="history-header">
-                        <span class="history-theme">${entry.theme}</span>
-                        <span class="tag ${statusClass}">${statusText}</span>
-                    </div>
-                    <div class="history-detail">${formattedDetails}</div>
-                `;
+                const header = el('div', 'history-header');
+                header.appendChild(el('span', 'history-theme', entry.theme));
+                header.appendChild(el('span', `tag ${statusClass}`, entry.isSuccess ? '成功' : '失敗'));
+                item.appendChild(header);
+
+                if (entry.cards) {
+                    // 新形式: カードごとに「名前(数字): メモ」で表示
+                    const list = el('div', 'history-cards');
+                    const cardsList = Array.isArray(entry.cards) ? entry.cards : Object.values(entry.cards);
+                    cardsList.forEach(c => {
+                        if (!c) return;
+                        const row = el('div', 'history-card-row');
+                        row.appendChild(el('span', 'history-card-name', `${c.name} (${c.value})`));
+                        if (c.memo) row.appendChild(el('span', 'history-card-memo', c.memo));
+                        list.appendChild(row);
+                    });
+                    item.appendChild(list);
+                } else {
+                    // 旧形式（cardsなし）: resultDetails 文字列をそのまま表示
+                    const detail = el('div', 'history-detail');
+                    String(entry.resultDetails || '').split('→').forEach((part, i) => {
+                        if (i > 0) detail.appendChild(el('span', 'arrow', '→'));
+                        detail.appendChild(document.createTextNode(part));
+                    });
+                    item.appendChild(detail);
+                }
+
                 this.historyList.appendChild(item);
             });
         });
@@ -1172,6 +1249,12 @@ class GameManager {
         this.exitBtn.addEventListener('click', () => this.exitGame());
         this.posOk.addEventListener('click', () => this.handlePositionSubmit());
         this.posCancel.addEventListener('click', () => this.positionModal.classList.add('hidden'));
+
+        this.memoSave.addEventListener('click', () => this.saveMemoEdit());
+        this.memoCancel.addEventListener('click', () => {
+            this._memoEditCardId = null;
+            this.memoModal.classList.add('hidden');
+        });
 
 
         this.confirmOk.addEventListener('click', () => {
@@ -1203,6 +1286,10 @@ class GameManager {
             if (e.target == this.nextGameModal) this.nextGameModal.classList.add('hidden');
             if (e.target == this.resultOverlay) this.resultOverlay.classList.add('hidden');
             if (e.target == this.positionModal) this.positionModal.classList.add('hidden');
+            if (e.target == this.memoModal) {
+                this._memoEditCardId = null;
+                this.memoModal.classList.add('hidden');
+            }
         });
 
         window.addEventListener('offline', () => this.showToast('オフラインです', 'warning'));

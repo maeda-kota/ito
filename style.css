@@ -454,7 +454,8 @@ footer {
     font-weight: bold;
 }
 
-.empty-msg { text-align: center; color: var(--text-sub); margin-top: 20px; }nfirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+.empty-msg { text-align: center; color: var(--text-sub); margin-top: 20px; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
 
 .result-icon {
     font-size: 2.0rem; 
@@ -490,6 +491,59 @@ footer {
     #lobby-screen {
         background-image: url('images/lobby-bg-mobile.png');
     }
+}
+
+/* =========================================
+   Memo Feature (カード提出時のひとことメモ)
+   ========================================= */
+/* カード＋メモ吹き出しの縦ラッパー（Sortableの並べ替え単位） */
+.field-slot {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+/* メモ吹き出し（常時表示方式）。
+   「長押しで表示」方式に変える場合は、ここを display:none にして
+   長押し時にクラスを付与する形へ切り替える（renderMemoBubble参照） */
+.memo-bubble {
+    max-width: 72px;
+    min-height: 18px;
+    box-sizing: border-box;
+    padding: 2px 8px;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    font-size: 0.65rem;
+    color: var(--text-main);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+    cursor: pointer;
+    user-select: none;
+}
+.memo-bubble .memo-text {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* タップで全文表示 */
+.memo-bubble.expanded { max-width: 140px; }
+.memo-bubble.expanded .memo-text { white-space: normal; overflow: visible; word-break: break-all; }
+
+/* 自分のカードのメモ: 編集可能を枠色で示す */
+.memo-bubble.editable { border-color: var(--primary); }
+/* メモ未入力の自分のカード: 追加ボタン風 */
+.memo-bubble.empty { border-style: dashed; color: var(--text-sub); background: transparent; box-shadow: none; }
+
+/* メモなし＆他人のカード: 高さ合わせのため場所だけ確保して非表示 */
+.memo-bubble.invisible { visibility: hidden; }
+
+@media (max-width: 600px) {
+    .memo-bubble { max-width: 60px; font-size: 0.6rem; }
+    .memo-bubble.expanded { max-width: 120px; }
 }
 
 /* =========================================
